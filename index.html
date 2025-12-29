@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Mini Mario Full Game</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: monospace;
+        }
+
+        #game {
+            width: 100vw;
+            height: 300px;
+            position: relative;
+            overflow: hidden;
+            background: #87ceeb;
+        }
+
+        .parallax-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-repeat: repeat-x;
+            background-position: 0 bottom;
+        }
+
+        .clouds {
+            background-image: url('image/toppng.com-cloud-clipart-super-mario-super-mario-bros-cloud-508x481.png');
+            opacity: 0.5;
+            z-index: 0;
+        }
+
+        .hills {
+            background-image: url('image/toppng.com-lawn-transparent-600x189.png');
+            opacity: 0.8;
+            z-index: 1;
+        }
+
+        .ground {
+            background-image: url('image/toppng.com-ixel-ground-grass-plot-871x191.png');
+            z-index: 2;
+        }
+
+        .player {
+            width: 32px;
+            height: 32px;
+            position: absolute;
+            background-image: url('image/toppng.com-mario-sprite-super-mario-bros-1-mario-3329x4097.png');
+            background-size: 128px 32px;
+            image-rendering: pixelated;
+            z-index: 5;
+        }
+
+        .block {
+            width: 32px;
+            height: 32px;
+            background: #c68642;
+            position: absolute;
+            z-index: 4;
+        }
+
+        .moving-block {
+            width: 32px;
+            height: 32px;
+            background: #8B4513;
+            position: absolute;
+            z-index: 4;
+        }
+
+        .enemy {
+            width: 28px;
+            height: 28px;
+            background: brown;
+            position: absolute;
+            z-index: 4;
+        }
+
+        .coin {
+            width: 18px;
+            height: 18px;
+            background: gold;
+            border-radius: 50%;
+            position: absolute;
+            z-index: 4;
+        }
+
+        #ui {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            color: white;
+            z-index: 20;
+        }
+
+        #overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, .6);
+            color: white;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            font-size: 32px;
+            z-index: 30;
+            flex-direction: column;
+        }
+
+        #overlay button {
+            margin-top: 20px;
+            font-size: 18px;
+            padding: 10px 20px;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="ui">Score: <span id="score">0</span></div>
+    <div id="game">
+        <div class="parallax-layer clouds"></div>
+        <div class="parallax-layer hills"></div>
+        <div class="parallax-layer ground"></div>
+    </div>
+    <div id="overlay">
+        Game Over<br>
+        <button onclick="restart()">Restart</button>
+    </div>
+
+    <script>
+        const game = document.getElementById("game");
+        const scoreEl = document.getElementById("score");
+        const overlay = document.getElementById("overlay");
+
+        let player, blocks, coins, movingBlocks, enemies;
+        let keys = {}, score = 0, running = true;
+        let cameraX = 0, walkFrame = 0;
+        const levelLength = 2500;
+
+        // Parallax layers
+        const cloudsLayer = document.querySelector(".clouds");
+        const hillsLayer = document.querySelector(".hills");
+        const groundLayer = document.querySelector(".ground");
+
+        document.addEventListener("keydown", e => {
+            keys[e.code] = true;
+            if (!running && e.code === "Space") restart();
+        });
+        document.addEventListener("keyup", e => keys[e.code] = false);
+
+        function make(cls) { const d = document.createElement("div"); d.className = cls; game.appendChild(d); return d; }
+        function newBlock(x, y) { return { x, y, w: 32, h: 32, el: make("block") }; }
+        function newMovingBlock(x, y, vx) { return { x, y, w: 32, h: 32, vx, el: make("moving-block") }; }
+        function newCoin(x, y) { return { x, y, w: 18, h: 18, collected: false, frame: 0, el: make("coin") }; }
+        function newEnemy(x, y, vx) { return { x, y, w: 28, h: 28, vx, vx0: vx, el: make("enemy"), dead: false }; }
+
+        function init() {
+            game.querySelectorAll("div:not(.parallax-layer)").forEach(d => d.remove());
+            score = 0; scoreEl.textContent = score; running = true; cameraX = 0; walkFrame = 0;
+
+            player = { x: 50, y: 64, w: 32, h: 32, vx: 0, vy: 0, onGround: true, el: make("player") };
+
+            blocks = []; coins = []; movingBlocks = []; enemies = [];
+            let lastX = 100;
+            while (lastX < levelLength) {
+                let y = 64 + Math.random() * 120;
+                if (Math.random() > 0.2) {
+                    blocks.push(newBlock(lastX, y));
+                    if (Math.random() > 0.3) coins.push(newCoin(lastX + 5, y + 32));
+                } else {
+                    movingBlocks.push(newMovingBlock(lastX, y, Math.random() > 0.5 ? 1.5 : -1.5));
+                    if (Math.random() > 0.3) coins.push(newCoin(lastX + 5, y + 32));
+                }
+                if (Math.random() > 0.8) enemies.push(newEnemy(lastX, y + 32, Math.random() > 0.5 ? 1.5 : -1.5));
+                lastX += 100 + Math.random() * 120;
+            }
+
+            overlay.style.display = "none";
+        }
+
+        function hit(a, b) { return !(a.x + a.w < b.x || a.x > b.x + b.w || a.y + a.h < b.y || a.y > b.y + b.h); }
+
+        function update() {
+            if (!running) return;
+
+            player.vx = (keys.ArrowRight ? 3 : 0) - (keys.ArrowLeft ? 3 : 0);
+            if (keys.Space && player.onGround) { player.vy = 10; player.onGround = false; }
+
+            player.vy -= 0.5;
+            player.x += player.vx;
+            player.y += player.vy;
+
+            if (player.y <= 64) { player.y = 64; player.vy = 0; player.onGround = true; }
+
+            blocks.forEach(b => { if (hit(player, b) && player.vy <= 0) { player.y = b.y + b.h; player.vy = 0; player.onGround = true; } });
+
+            movingBlocks.forEach(b => {
+                b.x += b.vx; if (b.x < 0 || b.x > levelLength) b.vx *= -1;
+                if (hit(player, b) && player.vy <= 0) { player.y = b.y + b.h; player.vy = 0; player.onGround = true; }
+            });
+
+            enemies.forEach(e => {
+                if (!e.dead) {
+                    e.x += e.vx; if (e.x < 0 || e.x > levelLength) e.vx *= -1;
+                    if (hit(player, e)) {
+                        if (player.vy < 0 && player.y > e.y + e.h / 2) { e.dead = true; e.el.style.display = "none"; player.vy = 6; score++; scoreEl.textContent = score; }
+                        else { endGame(); }
+                    }
+                }
+            });
+
+            coins.forEach(c => {
+                if (!c.collected && hit(player, c)) { c.collected = true; c.el.style.display = "none"; score++; scoreEl.textContent = score; }
+                if (!c.collected) { c.frame += 0.2; let scale = 1 + 0.2 * Math.sin(c.frame * Math.PI); c.el.style.transform = `scale(${scale})`; }
+            });
+
+            if (!player.onGround) player.el.style.backgroundPosition = '-96px 0';
+            else if (player.vx !== 0) { walkFrame += 0.2; if (walkFrame >= 3) walkFrame = 0; player.el.style.backgroundPosition = `-${32 * Math.floor(walkFrame)}px 0`; }
+            else player.el.style.backgroundPosition = '0 0';
+
+            cameraX = player.x - 200;
+
+            // Parallax effect
+            cloudsLayer.style.backgroundPosition = `${-cameraX * 0.2}px bottom`;
+            hillsLayer.style.backgroundPosition = `${-cameraX * 0.5}px bottom`;
+            groundLayer.style.backgroundPosition = `${-cameraX * 1}px bottom`;
+        }
+
+        function render() {
+            game.style.transform = `translateX(${-cameraX}px)`;
+            player.el.style.left = player.x + "px"; player.el.style.bottom = player.y + "px";
+            blocks.forEach(b => { b.el.style.left = b.x + "px"; b.el.style.bottom = b.y + "px"; });
+            movingBlocks.forEach(b => { b.el.style.left = b.x + "px"; b.el.style.bottom = b.y + "px"; });
+            coins.forEach(c => { c.el.style.left = c.x + "px"; c.el.style.bottom = c.y + "px"; });
+            enemies.forEach(e => { e.el.style.left = e.x + "px"; e.el.style.bottom = e.y + "px"; });
+        }
+
+        function loop() { update(); render(); requestAnimationFrame(loop); }
+        function restart() { init(); }
+        function endGame() { running = false; overlay.style.display = "flex"; }
+
+        init(); loop();
+    </script>
+</body>
+
+</html>
